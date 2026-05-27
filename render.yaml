@@ -1,0 +1,20 @@
+services:
+  - type: web
+    name: hrreach-bot
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: python app.py
+    envVars:
+      - key: BOT_TOKEN
+        sync: false
+      - key: ADMIN_ID
+        value: "6993392639"
+      - key: EMAIL
+        sync: false
+      - key: APP_PASSWORD
+        sync: false
+      - key: PORT
+        value: "5000"
+      - key: PYTHON_VERSION
+        value: "3.11.0"
