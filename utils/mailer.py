@@ -1,15 +1,19 @@
 """
 HRReach Bot - Mailer Module
-Sends emails via Gmail SMTP with resume attachment.
-Uses SSL (port 465) as primary, STARTTLS (port 587) as fallback.
+Sends emails via Resend API (HTTPS — works on Railway/Render).
+Falls back to Gmail SMTP on platforms that allow it.
 """
 
 import os
 import re
 import ssl
+import json
+import base64
 import socket
 import smtplib
 import logging
+import urllib.request
+import urllib.error
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from email.mime.base import MIMEBase
@@ -17,7 +21,7 @@ from email import encoders
 
 logger = logging.getLogger(__name__)
 
-# SMTP Configuration
+# SMTP Configuration (fallback)
 SMTP_SERVER = "smtp.gmail.com"
 SMTP_PORT_SSL = 465
 SMTP_PORT_TLS = 587
@@ -46,7 +50,68 @@ def is_resume_available() -> bool:
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-#   Gmail SMTP Methods
+#   RESEND API (Primary — works on Railway/Render via HTTPS)
+# ═══════════════════════════════════════════════════════════════════════════
+
+def _send_via_resend(to_email: str, subject: str, message: str) -> dict:
+    """Send email via Resend REST API. Works everywhere (HTTPS, port 443)."""
+    resend_key = os.getenv("RESEND_API_KEY")
+    sender_email = os.getenv("EMAIL", "")
+    sender_name = os.getenv("SENDER_NAME", "Sundhar K")
+
+    if not resend_key:
+        return {"success": False, "error": "RESEND_API_KEY not configured"}
+
+    try:
+        # Read and encode the resume
+        with open(RESUME_PATH, "rb") as f:
+            resume_b64 = base64.b64encode(f.read()).decode()
+
+        # Build the payload
+        payload = {
+            "from": f"{sender_name} <onboarding@resend.dev>",
+            "to": [to_email.strip()],
+            "reply_to": sender_email,
+            "subject": subject,
+            "text": message,
+            "attachments": [
+                {
+                    "content": resume_b64,
+                    "filename": "resume.pdf",
+                }
+            ],
+        }
+
+        data = json.dumps(payload).encode("utf-8")
+        req = urllib.request.Request(
+            "https://api.resend.com/emails",
+            data=data,
+            method="POST",
+            headers={
+                "Authorization": f"Bearer {resend_key}",
+                "Content-Type": "application/json",
+            },
+        )
+
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            result = json.loads(resp.read().decode())
+
+        if result.get("id"):
+            logger.info(f"✅ Resend: Email sent to {to_email} (ID: {result['id']})")
+            return {"success": True, "error": None}
+        return {"success": False, "error": f"Resend: Unexpected response: {result}"}
+
+    except urllib.error.HTTPError as e:
+        body = e.read().decode() if e.fp else str(e)
+        logger.error(f"Resend API error: {e.code} - {body}")
+        return {"success": False, "error": f"Resend error ({e.code}): {body}"}
+    except Exception as e:
+        logger.error(f"Resend failed: {e}")
+        return {"success": False, "error": f"Resend error: {str(e)}"}
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+#   SMTP Fallback (for platforms that allow SMTP)
 # ═══════════════════════════════════════════════════════════════════════════
 
 def _resolve_ipv4(host: str, port: int):
@@ -54,7 +119,7 @@ def _resolve_ipv4(host: str, port: int):
     try:
         results = socket.getaddrinfo(host, port, socket.AF_INET, socket.SOCK_STREAM)
         if results:
-            return results[0][4][0]  # Return the IPv4 address
+            return results[0][4][0]
     except socket.gaierror:
         pass
     return host
@@ -67,7 +132,7 @@ def _send_via_ssl(sender_email: str, app_password: str, to_email: str, msg: str)
         logger.info(f"Trying SSL (port {SMTP_PORT_SSL}) via {ipv4_addr}...")
 
         context = ssl.create_default_context()
-        with smtplib.SMTP_SSL(ipv4_addr, SMTP_PORT_SSL, timeout=30, context=context) as server:
+        with smtplib.SMTP_SSL(ipv4_addr, SMTP_PORT_SSL, timeout=15, context=context) as server:
             server.login(sender_email, app_password)
             server.sendmail(sender_email, to_email.strip(), msg)
 
@@ -83,7 +148,7 @@ def _send_via_starttls(sender_email: str, app_password: str, to_email: str, msg:
         ipv4_addr = _resolve_ipv4(SMTP_SERVER, SMTP_PORT_TLS)
         logger.info(f"Trying STARTTLS (port {SMTP_PORT_TLS}) via {ipv4_addr}...")
 
-        with smtplib.SMTP(ipv4_addr, SMTP_PORT_TLS, timeout=30) as server:
+        with smtplib.SMTP(ipv4_addr, SMTP_PORT_TLS, timeout=15) as server:
             server.ehlo()
             server.starttls()
             server.ehlo()
@@ -98,9 +163,8 @@ def _send_via_starttls(sender_email: str, app_password: str, to_email: str, msg:
 
 def send_email(to_email: str, subject: str, message: str) -> dict:
     """
-    Send an email with the resume attached via Gmail SMTP.
-    Tries SSL (port 465) first, then falls back to STARTTLS (port 587).
-    Forces IPv4 to avoid network unreachable errors on cloud platforms.
+    Send an email with the resume attached.
+    Priority: Resend API → Gmail SMTP SSL → Gmail SMTP STARTTLS.
 
     Args:
         to_email: Recipient HR email address
@@ -110,17 +174,10 @@ def send_email(to_email: str, subject: str, message: str) -> dict:
     Returns:
         dict with 'success' (bool) and 'error' (str or None)
     """
-    # Load credentials from environment
     sender_email = os.getenv("EMAIL")
     app_password = os.getenv("APP_PASSWORD")
 
     # --- Validation Checks ---
-    if not sender_email or not app_password:
-        return {
-            "success": False,
-            "error": "Email credentials not configured. Check EMAIL and APP_PASSWORD in .env"
-        }
-
     if not validate_email(to_email):
         return {
             "success": False,
@@ -145,54 +202,66 @@ def send_email(to_email: str, subject: str, message: str) -> dict:
             "error": "Email message is empty. Please update the message first."
         }
 
-    # --- Compose Email ---
-    try:
-        msg = MIMEMultipart()
-        msg["From"] = sender_email
-        msg["To"] = to_email.strip()
-        msg["Subject"] = subject
-
-        # Attach the email body
-        msg.attach(MIMEText(message, "plain"))
-
-        # Attach the resume PDF
-        with open(RESUME_PATH, "rb") as attachment:
-            part = MIMEBase("application", "octet-stream")
-            part.set_payload(attachment.read())
-            encoders.encode_base64(part)
-            part.add_header(
-                "Content-Disposition",
-                f"attachment; filename=resume.pdf"
-            )
-            msg.attach(part)
-
-        msg_string = msg.as_string()
-
-    except Exception as e:
-        return {
-            "success": False,
-            "error": f"Failed to compose email: {str(e)}"
-        }
-
     errors = []
 
-    # --- Method 1: SMTP SSL (port 465) ---
-    result = _send_via_ssl(sender_email, app_password, to_email, msg_string)
-    if result["success"]:
-        logger.info(f"✅ Email sent via SSL to {to_email}")
-        return result
-    errors.append(f"SSL: {result['error']}")
+    # --- Method 1: Resend API (works on Railway/Render) ---
+    resend_key = os.getenv("RESEND_API_KEY")
+    if resend_key:
+        logger.info(f"Sending via Resend API to {to_email}...")
+        result = _send_via_resend(to_email, subject, message)
+        if result["success"]:
+            return result
+        errors.append(f"Resend: {result['error']}")
+        logger.warning(f"Resend failed: {result['error']}")
 
-    # --- Method 2: SMTP STARTTLS (port 587) ---
-    result = _send_via_starttls(sender_email, app_password, to_email, msg_string)
-    if result["success"]:
-        logger.info(f"✅ Email sent via STARTTLS to {to_email}")
-        return result
-    errors.append(f"TLS: {result['error']}")
+    # --- SMTP Fallback (needs EMAIL + APP_PASSWORD) ---
+    if sender_email and app_password:
+        # Compose MIME email for SMTP
+        try:
+            msg = MIMEMultipart()
+            msg["From"] = sender_email
+            msg["To"] = to_email.strip()
+            msg["Subject"] = subject
+            msg.attach(MIMEText(message, "plain"))
 
-    # Both methods failed
+            with open(RESUME_PATH, "rb") as attachment:
+                part = MIMEBase("application", "octet-stream")
+                part.set_payload(attachment.read())
+                encoders.encode_base64(part)
+                part.add_header(
+                    "Content-Disposition",
+                    "attachment; filename=resume.pdf"
+                )
+                msg.attach(part)
+
+            msg_string = msg.as_string()
+        except Exception as e:
+            errors.append(f"Compose: {str(e)}")
+            error_detail = " | ".join(errors)
+            return {"success": False, "error": error_detail}
+
+        # Try SSL (port 465)
+        result = _send_via_ssl(sender_email, app_password, to_email, msg_string)
+        if result["success"]:
+            logger.info(f"✅ Email sent via SSL to {to_email}")
+            return result
+        errors.append(f"SSL: {result['error']}")
+
+        # Try STARTTLS (port 587)
+        result = _send_via_starttls(sender_email, app_password, to_email, msg_string)
+        if result["success"]:
+            logger.info(f"✅ Email sent via STARTTLS to {to_email}")
+            return result
+        errors.append(f"TLS: {result['error']}")
+    elif not resend_key:
+        return {
+            "success": False,
+            "error": "No email method configured. Set RESEND_API_KEY or EMAIL+APP_PASSWORD in .env"
+        }
+
+    # All methods failed
     error_detail = " | ".join(errors)
-    logger.error(f"All SMTP methods failed for {to_email}: {error_detail}")
+    logger.error(f"All methods failed for {to_email}: {error_detail}")
     return {
         "success": False,
         "error": error_detail
