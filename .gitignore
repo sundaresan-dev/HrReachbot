@@ -10,9 +10,6 @@ __pycache__/
 *.pyc
 *.pyo
 
-# Resume (uploaded at runtime)
-resume.pdf
-
 # OS files
 .DS_Store
 Thumbs.db
