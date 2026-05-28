@@ -151,6 +151,13 @@ async def resume_receive(update: Update, context: ContextTypes.DEFAULT_TYPE):
         file = await context.bot.get_file(document.file_id)
         await file.download_to_drive(RESUME_PATH)
 
+        # Sync resume to GitHub for persistence across redeploys
+        try:
+            from utils.github_sync import sync_resume
+            sync_resume()
+        except Exception:
+            pass
+
         file_size_kb = document.file_size / 1024
         await update.message.reply_text(
             f"✅ *Resume Updated Successfully!*\n\n"

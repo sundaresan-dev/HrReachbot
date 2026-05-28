@@ -51,9 +51,15 @@ def load_db() -> dict:
 
 
 def save_db(data: dict):
-    """Save the entire database to disk."""
+    """Save the entire database to disk and sync to GitHub."""
     with open(DB_PATH, "w") as f:
         json.dump(data, f, indent=2, ensure_ascii=False)
+    # Auto-sync to GitHub for persistence across redeploys
+    try:
+        from utils.github_sync import sync_database
+        sync_database()
+    except Exception:
+        pass  # Don't break saves if sync fails
 
 
 def get_subject() -> str:

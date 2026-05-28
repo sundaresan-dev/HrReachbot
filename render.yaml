@@ -16,6 +16,8 @@ services:
         sync: false
       - key: BREVO_API_KEY
         sync: false
+      - key: GITHUB_TOKEN
+        sync: false
       - key: PORT
         value: "5000"
       - key: PYTHON_VERSION
