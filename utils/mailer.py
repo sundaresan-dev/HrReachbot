@@ -55,6 +55,8 @@ def is_resume_available() -> bool:
 
 def _send_via_resend(to_email: str, subject: str, message: str) -> dict:
     """Send email via Resend REST API. Works everywhere (HTTPS, port 443)."""
+    import requests as req_lib
+
     resend_key = os.getenv("RESEND_API_KEY")
     sender_email = os.getenv("EMAIL", "")
     sender_name = os.getenv("SENDER_NAME", "Sundhar K")
@@ -82,29 +84,23 @@ def _send_via_resend(to_email: str, subject: str, message: str) -> dict:
             ],
         }
 
-        data = json.dumps(payload).encode("utf-8")
-        req = urllib.request.Request(
+        resp = req_lib.post(
             "https://api.resend.com/emails",
-            data=data,
-            method="POST",
+            json=payload,
             headers={
                 "Authorization": f"Bearer {resend_key}",
-                "Content-Type": "application/json",
             },
+            timeout=30,
         )
 
-        with urllib.request.urlopen(req, timeout=30) as resp:
-            result = json.loads(resp.read().decode())
-
-        if result.get("id"):
-            logger.info(f"✅ Resend: Email sent to {to_email} (ID: {result['id']})")
+        if resp.status_code == 200:
+            result = resp.json()
+            logger.info(f"✅ Resend: Email sent to {to_email} (ID: {result.get('id', 'unknown')})")
             return {"success": True, "error": None}
-        return {"success": False, "error": f"Resend: Unexpected response: {result}"}
+        else:
+            logger.error(f"Resend API error: {resp.status_code} - {resp.text}")
+            return {"success": False, "error": f"Resend error ({resp.status_code}): {resp.text}"}
 
-    except urllib.error.HTTPError as e:
-        body = e.read().decode() if e.fp else str(e)
-        logger.error(f"Resend API error: {e.code} - {body}")
-        return {"success": False, "error": f"Resend error ({e.code}): {body}"}
     except Exception as e:
         logger.error(f"Resend failed: {e}")
         return {"success": False, "error": f"Resend error: {str(e)}"}
