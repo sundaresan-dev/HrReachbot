@@ -1,6 +1,6 @@
 """
 HRReach Bot - Mailer Module
-Sends emails via Resend API (HTTPS — works on Railway/Render).
+Sends emails via Brevo API (HTTPS — works on Railway/Render).
 Falls back to Gmail SMTP on platforms that allow it.
 """
 
@@ -50,19 +50,19 @@ def is_resume_available() -> bool:
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-#   RESEND API (Primary — works on Railway/Render via HTTPS)
+#   BREVO API (Primary — works on Railway/Render via HTTPS)
 # ═══════════════════════════════════════════════════════════════════════════
 
-def _send_via_resend(to_email: str, subject: str, message: str) -> dict:
-    """Send email via Resend REST API. Works everywhere (HTTPS, port 443)."""
+def _send_via_brevo(to_email: str, subject: str, message: str) -> dict:
+    """Send email via Brevo REST API. Works everywhere (HTTPS, port 443)."""
     import requests as req_lib
 
-    resend_key = os.getenv("RESEND_API_KEY")
+    brevo_key = os.getenv("BREVO_API_KEY")
     sender_email = os.getenv("EMAIL", "")
     sender_name = os.getenv("SENDER_NAME", "Sundhar K")
 
-    if not resend_key:
-        return {"success": False, "error": "RESEND_API_KEY not configured"}
+    if not brevo_key:
+        return {"success": False, "error": "BREVO_API_KEY not configured"}
 
     try:
         # Read and encode the resume
@@ -71,39 +71,35 @@ def _send_via_resend(to_email: str, subject: str, message: str) -> dict:
 
         # Build the payload
         payload = {
-            "from": f"{sender_name} <onboarding@resend.dev>",
-            "to": [to_email.strip()],
-            "reply_to": sender_email,
+            "sender": {"name": sender_name, "email": sender_email},
+            "to": [{"email": to_email.strip()}],
             "subject": subject,
-            "text": message,
-            "attachments": [
-                {
-                    "content": resume_b64,
-                    "filename": "resume.pdf",
-                }
-            ],
+            "textContent": message,
+            "attachment": [{"content": resume_b64, "name": "resume.pdf"}],
         }
 
         resp = req_lib.post(
-            "https://api.resend.com/emails",
+            "https://api.brevo.com/v3/smtp/email",
             json=payload,
             headers={
-                "Authorization": f"Bearer {resend_key}",
+                "api-key": brevo_key,
+                "Content-Type": "application/json",
+                "Accept": "application/json",
             },
             timeout=30,
         )
 
-        if resp.status_code == 200:
+        if resp.status_code in (200, 201):
             result = resp.json()
-            logger.info(f"✅ Resend: Email sent to {to_email} (ID: {result.get('id', 'unknown')})")
+            logger.info(f"✅ Brevo: Email sent to {to_email} (ID: {result.get('messageId', 'unknown')})")
             return {"success": True, "error": None}
         else:
-            logger.error(f"Resend API error: {resp.status_code} - {resp.text}")
-            return {"success": False, "error": f"Resend error ({resp.status_code}): {resp.text}"}
+            logger.error(f"Brevo API error: {resp.status_code} - {resp.text}")
+            return {"success": False, "error": f"Brevo error ({resp.status_code}): {resp.text}"}
 
     except Exception as e:
-        logger.error(f"Resend failed: {e}")
-        return {"success": False, "error": f"Resend error: {str(e)}"}
+        logger.error(f"Brevo failed: {e}")
+        return {"success": False, "error": f"Brevo error: {str(e)}"}
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -200,15 +196,15 @@ def send_email(to_email: str, subject: str, message: str) -> dict:
 
     errors = []
 
-    # --- Method 1: Resend API (works on Railway/Render) ---
-    resend_key = os.getenv("RESEND_API_KEY")
-    if resend_key:
-        logger.info(f"Sending via Resend API to {to_email}...")
-        result = _send_via_resend(to_email, subject, message)
+    # --- Method 1: Brevo API (works on Railway/Render) ---
+    brevo_key = os.getenv("BREVO_API_KEY")
+    if brevo_key:
+        logger.info(f"Sending via Brevo API to {to_email}...")
+        result = _send_via_brevo(to_email, subject, message)
         if result["success"]:
             return result
-        errors.append(f"Resend: {result['error']}")
-        logger.warning(f"Resend failed: {result['error']}")
+        errors.append(f"Brevo: {result['error']}")
+        logger.warning(f"Brevo failed: {result['error']}")
 
     # --- SMTP Fallback (needs EMAIL + APP_PASSWORD) ---
     if sender_email and app_password:
