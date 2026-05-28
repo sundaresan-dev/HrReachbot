@@ -59,7 +59,7 @@ def _send_via_brevo(to_email: str, subject: str, message: str) -> dict:
 
     brevo_key = os.getenv("BREVO_API_KEY")
     sender_email = os.getenv("EMAIL", "")
-    sender_name = os.getenv("SENDER_NAME", "Sundhar K")
+    sender_name = os.getenv("SENDER_NAME", "Sundaresan K")
 
     if not brevo_key:
         return {"success": False, "error": "BREVO_API_KEY not configured"}
