@@ -1,6 +1,6 @@
 {
-  "total_sent": 1,
-  "success": 1,
+  "total_sent": 2,
+  "success": 2,
   "failed": 0,
   "subject": "Application for DevOps Engineer Fresher",
   "message": "Hello Sir/Madam,\n\nI hope this email finds you well. I am writing to express my interest in any available fresher positions at your esteemed organization.\n\nPlease find my resume attached for your review. I would be grateful for the opportunity to discuss how my skills and enthusiasm can contribute to your team.\n\nThank you for your time and consideration.\n\nBest regards,\nSundhar K",
@@ -10,6 +10,12 @@
       "subject": "Application for DevOps Engineer Fresher",
       "status": "success",
       "timestamp": "2026-05-28 05:38:17"
+    },
+    {
+      "email": "sundar2005ak@gmail.com",
+      "subject": "Application for DevOps Engineer Fresher",
+      "status": "success",
+      "timestamp": "2026-05-28 05:38:51"
     }
   ]
 }
